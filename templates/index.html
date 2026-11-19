@@ -1,0 +1,94 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Anime Recommender</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="card">
+    <h1>Anime Recommender</h1>
+    <p class="sub">Pilih sebuah judul, lalu lihat 10 anime dengan karakteristik paling mirip (jarak terdekat).</p>
+
+    <div class="search">
+      <input id="q" type="text" placeholder="Ketik judul anime, mis. Naruto" autocomplete="off">
+      <ul id="suggest" hidden></ul>
+    </div>
+
+    <section id="result" hidden></section>
+  </main>
+
+  <script>
+    const q = document.getElementById("q");
+    const suggest = document.getElementById("suggest");
+    const result = document.getElementById("result");
+    let timer;
+
+    const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
+      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    q.addEventListener("input", () => {
+      clearTimeout(timer);
+      timer = setTimeout(async () => {
+        const text = q.value.trim();
+        if (text.length < 2) { suggest.hidden = true; return; }
+        const res = await fetch("/search?q=" + encodeURIComponent(text));
+        const items = await res.json();
+        suggest.innerHTML = items.map((a) =>
+          `<li data-id="${a.id}" data-name="${esc(a.name)}">${esc(a.name)}</li>`).join("");
+        suggest.hidden = items.length === 0;
+      }, 200);
+    });
+
+    suggest.addEventListener("click", (e) => {
+      const li = e.target.closest("li");
+      if (!li) return;
+      q.value = li.dataset.name;
+      suggest.hidden = true;
+      recommend(li.dataset.id);
+    });
+
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".search")) suggest.hidden = true;
+    });
+
+    function meta(a) {
+      const parts = [a.type, a.episodes != null ? a.episodes + " eps" : null,
+                     a.rating != null ? "★ " + a.rating.toFixed(2) : null,
+                     "Cluster " + a.cluster].filter(Boolean);
+      return parts.join(" · ");
+    }
+
+    async function recommend(id) {
+      result.hidden = false;
+      result.className = "";
+      result.textContent = "Memproses...";
+      try {
+        const res = await fetch("/recommend?id=" + encodeURIComponent(id));
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || "Terjadi kesalahan.");
+        const s = data.selected;
+        const rows = data.recommendations.map((a, i) =>
+          `<li class="rec">
+             <span class="rank">${i + 1}</span>
+             <div class="info">
+               <strong>${esc(a.name)}</strong>
+               <small>${esc(meta(a))}</small>
+               <small class="genre">${esc(a.genre)}</small>
+             </div>
+             <span class="dist" title="Jarak (makin kecil = makin mirip)">${a.distance.toFixed(3)}</span>
+           </li>`).join("");
+        result.innerHTML =
+          `<div class="picked"><small>Judul terpilih</small><strong>${esc(s.name)}</strong>
+             <small>${esc(meta(s))}</small></div>
+           <p class="sub">10 rekomendasi terdekat</p>
+           <ol class="recs">${rows}</ol>`;
+      } catch (err) {
+        result.className = "error";
+        result.textContent = err.message;
+      }
+    }
+  </script>
+</body>
+</html>
