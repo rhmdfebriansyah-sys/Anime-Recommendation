@@ -1,4 +1,5 @@
 import os
+import re
 
 import joblib
 import numpy as np
@@ -33,11 +34,30 @@ def index():
 @app.route("/search")
 def search():
     q = request.args.get("q", "").strip().lower()
-    if len(q) < 2:
+    genre = request.args.get("genre", "").strip().lower()
+    
+    # Minimal salah satu query atau genre harus ada
+    if len(q) < 2 and not genre:
         return jsonify([])
-    mask = NAMES_LOWER.str.contains(q, regex=False)
-    hits = anime[mask].sort_values("members", ascending=False).head(10)
-    return jsonify([{"id": int(r.anime_id), "name": r["name"]} for _, r in hits.iterrows()])
+        
+    mask = pd.Series(True, index=anime.index)
+    
+    if q and len(q) >= 2:
+        mask &= NAMES_LOWER.str.contains(q, regex=False)
+        
+    if genre:
+        # Mencocokkan genre pada kolom genre (case-insensitive)
+        mask &= anime["genre"].fillna("").str.lower().str.contains(r"(?:\b|^)" + re.escape(genre) + r"(?:\b|$)", regex=True)
+        
+    hits = anime[mask].sort_values("members", ascending=False).head(15)
+    return jsonify([{
+        "id": int(r.anime_id),
+        "name": r["name"],
+        "genre": r["genre"] if isinstance(r["genre"], str) else "",
+        "type": r["type"] if isinstance(r["type"], str) else "",
+        "rating": None if pd.isna(r["rating"]) else float(r["rating"]),
+        "members": None if pd.isna(r["members"]) else int(r["members"])
+    } for _, r in hits.iterrows()])
 
 
 @app.route("/recommend")
@@ -51,10 +71,25 @@ def recommend():
     if idx is None:
         return jsonify(error="Anime tidak ditemukan."), 404
 
+    target_genre = request.args.get("genre", "").strip().lower()
+
     # jarak Euclidean di ruang fitur yang sama dengan K-Means
     dist = np.linalg.norm(X - X[idx], axis=1)
     dist[idx] = np.inf  # jangan rekomendasikan dirinya sendiri
-    nearest = np.argsort(dist)[:10]
+
+    if target_genre:
+        # Filter rekomendasi berdasarkan genre pilihan jika diminta
+        genre_mask = anime["genre"].fillna("").str.lower().str.contains(r"(?:\b|^)" + re.escape(target_genre) + r"(?:\b|$)", regex=True).to_numpy(copy=True)
+        genre_mask[idx] = False
+        valid_indices = np.where(genre_mask)[0]
+        if len(valid_indices) > 0:
+            sub_dist = dist[valid_indices]
+            nearest_sub = np.argsort(sub_dist)[:12]
+            nearest = valid_indices[nearest_sub]
+        else:
+            nearest = np.argsort(dist)[:12]
+    else:
+        nearest = np.argsort(dist)[:12]
 
     def to_item(i):
         r = anime.iloc[i]

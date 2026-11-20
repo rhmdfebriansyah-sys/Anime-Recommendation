@@ -2,91 +2,343 @@
 <html lang="id">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Anime Recommender</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>AniMatch AI — Rekomendasi Anime Berbasis K-Means</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
   <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-  <main class="card">
-    <h1>Anime Recommender</h1>
-    <p class="sub">Pilih sebuah judul, lalu lihat 10 anime dengan karakteristik paling mirip (jarak terdekat).</p>
+  <div class="ambient-glow"></div>
 
-    <div class="search">
-      <input id="q" type="text" placeholder="Ketik judul anime, mis. Naruto" autocomplete="off">
-      <ul id="suggest" hidden></ul>
+  <div class="container">
+    <!-- Hero Header -->
+    <header class="hero-header">
+      <div class="badge-tag">
+        <span class="pulse"></span>
+        Machine Learning • K-Means Clustering
+      </div>
+      <h1>Temukan Anime Favoritmu dengan <span class="text-gradient">AniMatch AI</span></h1>
+      <p class="subtitle">
+        Sistem rekomendasi anime pintar berbasis kemiripan karakteristik <em>(Content-Based + Clustering)</em>. Pilih genre favoritmu atau langsung cari judul anime!
+      </p>
+    </header>
+
+    <!-- Main Controller Card -->
+    <div class="glass-panel">
+      <!-- Step 1: Genre Filter Feature -->
+      <section class="genre-section">
+        <div class="step-label">
+          <span class="step-num">1</span>
+          <span>Pilih Genre (Opsional / Filter Awal):</span>
+        </div>
+        <div class="genre-filter-wrapper">
+          <div class="genre-chips-container" id="genreContainer">
+            <label class="genre-chip">
+              <input type="radio" name="genreFilter" value="" checked>
+              <span class="chip-content">✨ Semua Genre</span>
+            </label>
+            {% for g in genres %}
+            <label class="genre-chip">
+              <input type="radio" name="genreFilter" value="{{ g }}">
+              <span class="chip-content">{{ g }}</span>
+            </label>
+            {% endfor %}
+          </div>
+          <div class="active-genre-notice" id="activeGenreNotice" style="display: none;">
+            <i class="fa-solid fa-filter"></i>
+            <span>Filter genre aktif: <strong id="activeGenreName">-</strong></span>
+            <button type="button" id="resetGenreBtn" style="background:none;border:none;color:#f43f5e;cursor:pointer;font-size:0.8rem;text-decoration:underline;margin-left:6px;">Reset</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Step 2: Search Anime -->
+      <section class="search-section">
+        <div class="step-label">
+          <span class="step-num">2</span>
+          <span>Cari Anime yang Kamu Sukai:</span>
+        </div>
+        <div class="search-box-inner">
+          <i class="fa-solid fa-magnifying-glass search-icon"></i>
+          <input 
+            id="searchInput" 
+            class="search-input" 
+            type="text" 
+            placeholder="Ketik judul anime (mis. Naruto, Steins;Gate, Kimi no Na wa)..." 
+            autocomplete="off"
+          >
+          <button id="clearSearch" class="clear-btn" type="button" title="Hapus"><i class="fa-solid fa-xmark"></i></button>
+          <ul id="suggestList" class="suggest-list" style="display: none;"></ul>
+        </div>
+
+        <!-- Quick Suggestions -->
+        <div class="quick-picks-bar">
+          <span><i class="fa-solid fa-bolt"></i> Contoh populer:</span>
+          <span class="quick-pick-tag" data-title="Kimi no Na wa.">Kimi no Na wa.</span>
+          <span class="quick-pick-tag" data-title="Fullmetal Alchemist: Brotherhood">FMA: Brotherhood</span>
+          <span class="quick-pick-tag" data-title="Hunter x Hunter (2011)">Hunter x Hunter</span>
+          <span class="quick-pick-tag" data-title="Death Note">Death Note</span>
+          <span class="quick-pick-tag" data-title="Shingeki no Kyojin">Attack on Titan</span>
+        </div>
+      </section>
     </div>
 
-    <section id="result" hidden></section>
-  </main>
+    <!-- Results Section -->
+    <main id="resultsArea" class="results-container" style="display: none;">
+      <!-- Selected Anime Highlight -->
+      <div id="selectedAnimeCard" class="selected-anime-card">
+        <!-- Rendered via JS -->
+      </div>
+
+      <!-- Recommendations Grid -->
+      <div>
+        <div class="grid-title-row">
+          <h2 class="grid-title">
+            <i class="fa-solid fa-wand-magic-sparkles text-gradient"></i>
+            Rekomendasi Anime Terdekat
+          </h2>
+          <span id="genreBadgeFilter" class="meta-pill" style="display: none;">Filter Genre Terapan</span>
+        </div>
+        <div id="recsGrid" class="recommendations-grid">
+          <!-- Rendered via JS -->
+        </div>
+      </div>
+    </main>
+
+    <!-- State Indicator (Loading / Error / Empty) -->
+    <div id="statusState" class="state-box" style="display: none;"></div>
+
+    <footer class="footer">
+      <p>Data & K-Means Model • Anime Recommendation (10 Years Ago Dataset)</p>
+    </footer>
+  </div>
 
   <script>
-    const q = document.getElementById("q");
-    const suggest = document.getElementById("suggest");
-    const result = document.getElementById("result");
-    let timer;
+    const searchInput = document.getElementById("searchInput");
+    const clearSearch = document.getElementById("clearSearch");
+    const suggestList = document.getElementById("suggestList");
+    const resultsArea = document.getElementById("resultsArea");
+    const selectedAnimeCard = document.getElementById("selectedAnimeCard");
+    const recsGrid = document.getElementById("recsGrid");
+    const statusState = document.getElementById("statusState");
+    const genreRadios = document.querySelectorAll('input[name="genreFilter"]');
+    const activeGenreNotice = document.getElementById("activeGenreNotice");
+    const activeGenreName = document.getElementById("activeGenreName");
+    const resetGenreBtn = document.getElementById("resetGenreBtn");
+    const genreBadgeFilter = document.getElementById("genreBadgeFilter");
 
-    const esc = (s) => String(s).replace(/[&<>"']/g, (c) =>
-      ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    let debounceTimer;
+    let currentSelectedId = null;
 
-    q.addEventListener("input", () => {
-      clearTimeout(timer);
-      timer = setTimeout(async () => {
-        const text = q.value.trim();
-        if (text.length < 2) { suggest.hidden = true; return; }
-        const res = await fetch("/search?q=" + encodeURIComponent(text));
-        const items = await res.json();
-        suggest.innerHTML = items.map((a) =>
-          `<li data-id="${a.id}" data-name="${esc(a.name)}">${esc(a.name)}</li>`).join("");
-        suggest.hidden = items.length === 0;
-      }, 200);
-    });
+    const escapeHTML = (str) => {
+      if (!str) return "";
+      return String(str).replace(/[&<>"']/g, (c) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      }[c]));
+    };
 
-    suggest.addEventListener("click", (e) => {
-      const li = e.target.closest("li");
-      if (!li) return;
-      q.value = li.dataset.name;
-      suggest.hidden = true;
-      recommend(li.dataset.id);
-    });
-
-    document.addEventListener("click", (e) => {
-      if (!e.target.closest(".search")) suggest.hidden = true;
-    });
-
-    function meta(a) {
-      const parts = [a.type, a.episodes != null ? a.episodes + " eps" : null,
-                     a.rating != null ? "★ " + a.rating.toFixed(2) : null,
-                     "Cluster " + a.cluster].filter(Boolean);
-      return parts.join(" · ");
+    function getSelectedGenre() {
+      const checked = document.querySelector('input[name="genreFilter"]:checked');
+      return checked ? checked.value : "";
     }
 
-    async function recommend(id) {
-      result.hidden = false;
-      result.className = "";
-      result.textContent = "Memproses...";
+    // Genre selection events
+    genreRadios.forEach(radio => {
+      radio.addEventListener("change", (e) => {
+        const val = e.target.value;
+        if (val) {
+          activeGenreNotice.style.display = "flex";
+          activeGenreName.textContent = val;
+        } else {
+          activeGenreNotice.style.display = "none";
+        }
+
+        // Jika anime sudah dipilih, perbarui rekomendasi dengan filter genre yang baru
+        if (currentSelectedId) {
+          fetchRecommendations(currentSelectedId);
+        } else if (searchInput.value.trim().length >= 2) {
+          triggerSearch(searchInput.value.trim());
+        }
+      });
+    });
+
+    resetGenreBtn.addEventListener("click", () => {
+      const allRadio = document.querySelector('input[name="genreFilter"][value=""]');
+      if (allRadio) {
+        allRadio.checked = true;
+        allRadio.dispatchEvent(new Event("change"));
+      }
+    });
+
+    // Quick tag clicks
+    document.querySelectorAll(".quick-pick-tag").forEach(tag => {
+      tag.addEventListener("click", () => {
+        const title = tag.dataset.title;
+        searchInput.value = title;
+        clearSearch.style.display = "block";
+        triggerSearch(title);
+      });
+    });
+
+    // Search input typing debounce
+    searchInput.addEventListener("input", () => {
+      const query = searchInput.value.trim();
+      clearSearch.style.display = query ? "block" : "none";
+      clearTimeout(debounceTimer);
+      if (query.length < 2) {
+        suggestList.style.display = "none";
+        return;
+      }
+      debounceTimer = setTimeout(() => {
+        triggerSearch(query);
+      }, 220);
+    });
+
+    clearSearch.addEventListener("click", () => {
+      searchInput.value = "";
+      clearSearch.style.display = "none";
+      suggestList.style.display = "none";
+      searchInput.focus();
+    });
+
+    async function triggerSearch(query) {
+      const genre = getSelectedGenre();
       try {
-        const res = await fetch("/recommend?id=" + encodeURIComponent(id));
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Terjadi kesalahan.");
-        const s = data.selected;
-        const rows = data.recommendations.map((a, i) =>
-          `<li class="rec">
-             <span class="rank">${i + 1}</span>
-             <div class="info">
-               <strong>${esc(a.name)}</strong>
-               <small>${esc(meta(a))}</small>
-               <small class="genre">${esc(a.genre)}</small>
-             </div>
-             <span class="dist" title="Jarak (makin kecil = makin mirip)">${a.distance.toFixed(3)}</span>
-           </li>`).join("");
-        result.innerHTML =
-          `<div class="picked"><small>Judul terpilih</small><strong>${esc(s.name)}</strong>
-             <small>${esc(meta(s))}</small></div>
-           <p class="sub">10 rekomendasi terdekat</p>
-           <ol class="recs">${rows}</ol>`;
+        const res = await fetch(`/search?q=${encodeURIComponent(query)}&genre=${encodeURIComponent(genre)}`);
+        const items = await res.json();
+        if (!items || items.length === 0) {
+          suggestList.innerHTML = `<li style="padding: 14px 18px; color: var(--text-dim); font-size: 0.9rem;">Tidak ada anime yang cocok.</li>`;
+          suggestList.style.display = "block";
+          return;
+        }
+
+        suggestList.innerHTML = items.map(item => `
+          <li class="suggest-item" data-id="${item.id}" data-name="${escapeHTML(item.name)}">
+            <div>
+              <div class="suggest-title">${escapeHTML(item.name)}</div>
+              <div class="suggest-meta">
+                <span>${escapeHTML(item.type || 'Anime')}</span>
+                <span>•</span>
+                <span>⭐ ${item.rating ? Number(item.rating).toFixed(2) : 'N/A'}</span>
+                ${item.genre ? `<span>•</span> <span>${escapeHTML(item.genre.split(',').slice(0, 3).join(', '))}</span>` : ''}
+              </div>
+            </div>
+            <i class="fa-solid fa-chevron-right" style="color: var(--text-dim); font-size: 0.8rem;"></i>
+          </li>
+        `).join("");
+        suggestList.style.display = "block";
       } catch (err) {
-        result.className = "error";
-        result.textContent = err.message;
+        console.error("Search error:", err);
+      }
+    }
+
+    // Handle suggestion item click
+    suggestList.addEventListener("click", (e) => {
+      const item = e.target.closest(".suggest-item");
+      if (!item) return;
+      const animeId = item.dataset.id;
+      const animeName = item.dataset.name;
+      searchInput.value = animeName;
+      suggestList.style.display = "none";
+      fetchRecommendations(animeId);
+    });
+
+    // Close suggestion list on clicking outside
+    document.addEventListener("click", (e) => {
+      if (!e.target.closest(".search-section")) {
+        suggestList.style.display = "none";
+      }
+    });
+
+    async function fetchRecommendations(id) {
+      currentSelectedId = id;
+      const genre = getSelectedGenre();
+      resultsArea.style.display = "none";
+      statusState.style.display = "block";
+      statusState.innerHTML = `
+        <div class="spinner"></div>
+        <p>Menganalisis kemiripan fitur dengan K-Means Cluster...</p>
+      `;
+
+      try {
+        let url = `/recommend?id=${encodeURIComponent(id)}`;
+        if (genre) {
+          url += `&genre=${encodeURIComponent(genre)}`;
+        }
+        const res = await fetch(url);
+        const data = await res.json();
+
+        if (!res.ok) throw new Error(data.error || "Gagal mengambil rekomendasi.");
+
+        const s = data.selected;
+        selectedAnimeCard.innerHTML = `
+          <div class="card-badge"><i class="fa-solid fa-circle-check"></i> Anime Pilihan Kamu</div>
+          <h3 class="selected-title">${escapeHTML(s.name)}</h3>
+          <div class="meta-tags">
+            <span class="meta-pill"><i class="fa-solid fa-film"></i> ${escapeHTML(s.type || 'N/A')}</span>
+            <span class="meta-pill"><i class="fa-solid fa-tv"></i> ${s.episodes != null ? s.episodes + ' eps' : 'N/A eps'}</span>
+            <span class="meta-pill rating"><i class="fa-solid fa-star"></i> ${s.rating != null ? Number(s.rating).toFixed(2) : 'N/A'}</span>
+            <span class="meta-pill cluster"><i class="fa-solid fa-circle-nodes"></i> Cluster ${s.cluster}</span>
+          </div>
+          <p style="font-size: 0.85rem; color: var(--text-muted); margin-top: 4px;">
+            <i class="fa-solid fa-tags" style="color: var(--accent-color); margin-right: 4px;"></i>
+            ${escapeHTML(s.genre || 'Tidak ada info genre')}
+          </p>
+        `;
+
+        if (genre) {
+          genreBadgeFilter.style.display = "inline-flex";
+          genreBadgeFilter.innerHTML = `<i class="fa-solid fa-filter" style="margin-right:6px;"></i> Genre: ${escapeHTML(genre)}`;
+        } else {
+          genreBadgeFilter.style.display = "none";
+        }
+
+        if (data.recommendations.length === 0) {
+          recsGrid.innerHTML = `
+            <div style="grid-column: 1 / -1; padding: 40px; text-align: center; color: var(--text-dim);">
+              <i class="fa-regular fa-face-frown" style="font-size: 2rem; margin-bottom: 10px; display: block;"></i>
+              Tidak ada rekomendasi terdekat yang cocok dengan genre terpilih. Coba pilih genre lain atau 'Semua Genre'.
+            </div>
+          `;
+        } else {
+          recsGrid.innerHTML = data.recommendations.map((a, idx) => {
+            // Skala kemiripan relatif untuk visualisasi
+            const similarityPercent = Math.max(10, Math.round(100 - (a.distance * 12)));
+            return `
+              <div class="rec-card" onclick="fetchRecommendations(${a.id})">
+                <div>
+                  <div class="rec-header">
+                    <span class="rec-rank">#${idx + 1}</span>
+                    <span class="meta-pill rating" style="font-size: 0.75rem;">★ ${a.rating ? Number(a.rating).toFixed(2) : '-'}</span>
+                  </div>
+                  <h4 class="rec-title" title="${escapeHTML(a.name)}">${escapeHTML(a.name)}</h4>
+                  <div class="rec-genres" title="${escapeHTML(a.genre)}">${escapeHTML(a.genre || 'Genre N/A')}</div>
+                </div>
+                <div class="rec-footer">
+                  <span class="meta-pill" style="font-size: 0.75rem;">${escapeHTML(a.type || 'Anime')}</span>
+                  <div class="similarity-meter" title="Euclidean distance: ${a.distance}">
+                    <i class="fa-solid fa-chart-simple"></i>
+                    <span>Jarak: ${a.distance.toFixed(3)}</span>
+                  </div>
+                </div>
+              </div>
+            `;
+          }).join("");
+        }
+
+        statusState.style.display = "none";
+        resultsArea.style.display = "flex";
+      } catch (err) {
+        statusState.style.display = "block";
+        statusState.innerHTML = `
+          <div style="color: #f43f5e; font-weight: 600;">
+            <i class="fa-solid fa-triangle-exclamation" style="font-size: 2rem; margin-bottom: 10px; display: block;"></i>
+            ${escapeHTML(err.message)}
+          </div>
+        `;
       }
     }
   </script>
